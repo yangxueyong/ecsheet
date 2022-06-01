@@ -4,6 +4,7 @@ import cn.hutool.core.util.EscapeUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSON;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * @author Mars
@@ -146,37 +148,87 @@ public class MessageProcess implements IMessageProcess {
      */
     private WorkSheetEntity singleCellRefresh(WorkSheetEntity ws, JSONObject message) {
         //对celldata进行深拷贝
-        JSONArray celldata = ObjectUtil.cloneByStream(ws.getData().getJSONArray("celldata"));
+        JSONArray data1 = ws.getData().getJSONArray("celldata");
+        JSONArray celldata = ObjectUtil.cloneByStream(data1);
         if (StrUtil.isBlank(message.getStr("v"))) {
             celldata.forEach(c -> {
                 JSONObject jsonObject = JSONUtil.parseObj(c);
                 if (!jsonObject.isEmpty()) {
-                    if (jsonObject.getLong("r") == message.getLong("r") && jsonObject.getLong("c") == message.getLong("c")) {
-                        ws.getData().getJSONArray("celldata").remove(jsonObject);
+                    if (jsonObject.getLong("r") .equals(message.getLong("r")) && jsonObject.getLong("c") .equals( message.getLong("c"))) {
+                        data1.remove(jsonObject);
                     }
                 }
             });
         } else {
-            JSONObject collectData = JSONUtil.createObj().put("r", message.getLong("r")).put("c", message.getLong("c")).put("v", message.getJSONObject("v"));
-
+            Object messageV = message.get("v");
+            JSONObject collectData = JSONUtil.createObj().put("r", message.getLong("r")).put("c", message.getLong("c")).put("v", messageV);
+            if(messageV == null || "{}".equals(messageV.toString().trim())){
+                return ws;
+            }
+            List<JSONObject> adds = new ArrayList<>();
+            List<JSONObject> removes = new ArrayList<>();
             List<String> flag = new ArrayList<>();
-            celldata.forEach(c -> {
-                JSONObject jsonObject = JSONUtil.parseObj(c);
-                if (!jsonObject.isEmpty()) {
-                    if (jsonObject.getLong("r") == message.getLong("r") && jsonObject.getLong("c") == message.getLong("c")) {
-                        ws.getData().getJSONArray("celldata").remove(jsonObject);
-                        ws.getData().getJSONArray("celldata").add(collectData);
-                        flag.add("used");
+            for (int i = 0; i < data1.size(); i++) {
+                JSONObject jsonObject = data1.getJSONObject(i);
+                if (jsonObject.isEmpty()) {
+                    continue;
+                }
+                if (jsonObject.getLong("r") .equals( message.getLong("r")) && jsonObject.getLong("c") .equals( message.getLong("c"))) {
+                    JSONObject v = jsonObject.getJSONObject("v");
+                    flag.add("used");
+                    if(v == null || v.get("f") == null) {
+                        removes.add(jsonObject);
+                        adds.add(collectData);
+                        continue;
+                    }
+                    if(isBasicDataType(messageV)){
+                        v.put("v",messageV);
+                        continue;
+                    }
+                    if(messageV instanceof JSONObject){
+                        Set<String> keys = ((JSONObject)messageV).keySet();
+                        for (String key : keys) {
+                            v.put(key,((JSONObject)messageV).get(key));
+                        }
                     }
                 }
-            });
+            }
+            data1.removeAll(removes);
+            data1.addAll(adds);
             if (flag.isEmpty()) {
-                ws.getData().getJSONArray("celldata").add(collectData);
+                data1.add(collectData);
             }
         }
         return ws;
     }
 
+    private boolean isBasicDataType(Object messageV){
+        if(messageV instanceof Integer){
+            return true;
+        }
+        if(messageV instanceof Long){
+            return true;
+        }
+        if(messageV instanceof Double){
+            return true;
+        }
+        if(messageV instanceof Float){
+            return true;
+        }
+        if(messageV instanceof Short){
+            return true;
+        }
+        if(messageV instanceof Character){
+            return true;
+        }
+        if(messageV instanceof Boolean){
+            return true;
+        }
+        if(messageV instanceof Byte){
+            return true;
+        }
+        return false;
+    }
 
     /**
      * 范围单元格刷新
@@ -238,12 +290,13 @@ public class MessageProcess implements IMessageProcess {
      * @return
      */
     private WorkSheetEntity configRefresh(WorkSheetEntity ws, JSONObject message) {
-        JSONObject v = message.getJSONObject("v");
-        JSONObject newConfig = JSONUtil.createObj().put(message.getStr("k"), v);
+        Object vObj = message.get("v");
+        JSONObject newConfig = JSONUtil.createObj().put(message.getStr("k"), vObj);
         if (ws.getData().getJSONObject("config").isEmpty()) {
-            ws.getData().put("config", newConfig);
+            JSONObject config = ws.getData().put("config", newConfig);
         } else {
-            ws.getData().getJSONObject("config").put(message.getStr("k"), v);
+            JSONObject config = ws.getData().getJSONObject("config").put(message.getStr("k"), vObj);
+            ws.getData().put("config",config);
         }
 
         return ws;
